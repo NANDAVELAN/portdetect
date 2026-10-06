@@ -1,0 +1,331 @@
+# Port Detective - Technical Documentation & Learning Guide
+
+## Project Overview
+**Port Detective** (`portdetect`) is a developer-focused diagnostic tool that answers:
+> *"Who is using my port?"*
+
+Developers frequently encounter `EADDRINUSE` or `bind: address already in use` errors when launching local dev servers, containers, or background workers. Port Detective identifies whether a port is occupied, unmasks the exact operating system process (PID, name, full command line, user), and checks for Docker container port mappings.
+
+---
+
+## Phase 1: Minimum Socket-Based Port Check
+
+### 1. The Core Problem
+Before determining *who* owns a port, the operating system must first answer: **Is anything listening on this port right now?**
+
+### 2. Networking Fundamentals
+
+#### Ports & The TCP Handshake
+- **Port**: A 16-bit number (`1` to `65535`) identifying a communication endpoint on a host.
+  - System ports: `1`–`1023` (e.g. `80`, `443`, `22`)
+  - Registered ports: `1024`–`49151` (e.g. `8080`, `3000`, `5432`)
+  - Dynamic / Ephemeral ports: `49152`–`65535`
+- **TCP (Transmission Control Protocol)**: Connection-oriented protocol using a 3-way handshake:
+  1. Client sends `SYN` (Synchronize).
+  2. Server responds with `SYN-ACK` (Synchronize-Acknowledge) if listening, or `RST` (Reset) if closed.
+  3. Client replies with `ACK` (Acknowledge) to establish the connection.
+- **Listening State**: A process has invoked `socket()`, `bind((ip, port))`, and `listen()`. The OS kernel queues incoming connections on that port.
+
+#### `127.0.0.1` vs `localhost`
+- `127.0.0.1` is the IPv4 **loopback address**. Traffic stays entirely within the OS kernel network stack without leaving the physical network interface.
+- `localhost` is a domain name that may resolve to `127.0.0.1` (IPv4) or `::1` (IPv6). Targeting `127.0.0.1` avoids DNS lookup overhead and IPv4/IPv6 resolution ambiguity.
+
+#### Python `connect_ex()` vs `connect()`
+- `socket.connect((host, port))`: Attempts connection. Raises `ConnectionRefusedError` or `TimeoutError` on failure.
+- `socket.connect_ex((host, port))`: Returns C errno code directly without raising exceptions:
+  - `0`: Connection succeeded (port is open and listening).
+  - Non-zero (e.g., Windows `10061` / `WSAECONNREFUSED` or POSIX `111` / `ECONNREFUSED`): Port is closed or unreachable.
+
+### 3. Architecture Diagram
+
+```text
+               +---------------------------+
+               |  CLI: python portdetect   |
+               |       args: <port>        |
+               +-------------+-------------+
+                             |
+                             v
+               +---------------------------+
+               | socket(AF_INET,SOCK_STREAM|
+               | settimeout(1.0)           |
+               +-------------+-------------+
+                             |
+                             | connect_ex(("127.0.0.1", port))
+                             v
+               +---------------------------+
+               | Windows TCP/IP Stack      |
+               | Loopback (127.0.0.1)      |
+               +-------------+-------------+
+                            / \
+             Return == 0   /   \  Return != 0 (e.g., 10061)
+                          /     \
+                         v       v
+            +----------------+  +-----------------+
+            |  PORT IN USE   |  |    PORT FREE    |
+            |  (Listening)   |  |    (Closed)     |
+            +----------------+  +-----------------+
+```
+
+### 4. Implementation Details
+The minimal script [portdetect.py](file:///c:/Python/port_detect/portdetect.py):
+- Uses standard library modules: `socket`, `argparse`, `sys`.
+- Sets a non-blocking timeout (`1.0s`) to avoid hanging on silent firewalls.
+- Validates port range (`1 <= port <= 65535`).
+- Returns exit code `0` on success and `1` on invalid arguments.
+
+---
+
+## Phase 2: Process Detection & Attribution
+
+### 1. The Core Problem
+Knowing a port is occupied is only half the diagnosis. Developers must find out **which program is occupying it**:
+- What is its Process ID (PID)?
+- What is the binary name (e.g. `python.exe`, `node.exe`, `postgres.exe`)?
+- What was the full command line used to launch it?
+- Which user account owns it?
+
+### 2. Operating System Concepts
+
+#### Process ID (PID)
+A PID is a unique positive integer assigned by the OS kernel to an executing process instance. Sockets created by a process are held as open file/socket handles registered in the kernel's file descriptor table.
+
+#### OS Socket-to-PID Mapping
+- **Windows**: The OS kernel maintains an Extended TCP Table (`GetExtendedTcpTable` via IP Helper API `iphlpapi.dll`). This table maps every local IP:port and connection state to the owning PID. Native tools like `netstat -ano` and `Get-NetTCPConnection` query this table.
+- **Linux**: The kernel exposes `/proc/net/tcp` (and `/proc/net/tcp6`) with socket inode numbers. Tools match these inodes against `/proc/<pid>/fd/*` socket descriptors.
+- **`psutil`**: A battle-tested cross-platform library that wraps these low-level OS APIs. `psutil.net_connections(kind="inet")` queries all active sockets, and `psutil.Process(pid)` retrieves process metadata.
+
+#### Permissions & `psutil.AccessDenied`
+On Windows and Linux:
+- Normal (non-administrator) users can often see connection entries and PIDs.
+- However, calling `proc.cmdline()`, `proc.username()`, or `proc.environ()` on elevated processes (like system services or tasks owned by other users) fails with `AccessDenied` / `PermissionError`.
+- **Defensive handling**: Wrap individual property lookups in `try...except psutil.AccessDenied` so the CLI degrades gracefully and still reports PID, binary name, and binding addresses instead of crashing.
+
+### 3. Architecture Diagram
+
+```text
+               +-----------------------------+
+               |   CLI: python portdetect    |
+               |        port: 8080           |
+               +--------------+--------------+
+                              |
+              +---------------+---------------+
+              |                               |
+              v                               v
+    +--------------------+          +--------------------+
+    | is_port_in_use()   |          | find_processes()   |
+    | (Socket Handshake) |          | (psutil)           |
+    +---------+----------+          +---------+----------+
+              |                               |
+              | SYN / SYN-ACK                 | net_connections(kind="inet")
+              v                               v
+    +--------------------+          +--------------------+
+    | Port Open Check    |          | Filter by Port     |
+    +---------+----------+          | Match: laddr.port  |
+              |                     +---------+----------+
+              |                               |
+              |                               v
+              |                     +--------------------+
+              |                     | psutil.Process(PID)|
+              |                     | Name, Cmdline, User|
+              |                     | (Handle AccessDeny)|
+              |                     +---------+----------+
+              \                               /
+               \                             /
+                v                           v
+              +-------------------------------+
+              |   Structured Formatted Output |
+              |  - Port Status: IN USE        |
+              |  - PID & Executable Name      |
+              |  - Bind Address & State       |
+              |  - Full Command Line & User   |
+              +-------------------------------+
+```
+
+### 4. Implementation Details
+In [portdetect.py](file:///c:/Python/port_detect/portdetect.py):
+- `ProcessInfo` dataclass encapsulates all attributes cleanly.
+- `find_processes_on_port(port)` groups bindings by PID (handling IPv4 `0.0.0.0` and IPv6 `[::]` dual-stack bindings).
+- `get_process_info_by_pid(pid, ...)` uses granular `try/except` blocks around `name()`, `cmdline()`, `username()`, and `create_time()` to safeguard against `psutil.NoSuchProcess` (race conditions) and `psutil.AccessDenied` (privilege boundaries).
+
+### 5. Verified Experiment
+Running `python portdetect.py 11434` against an active local service:
+```text
+Port 11434 is IN USE (listening).
+
+Found 1 process(es) associated with port 11434:
+
+  [1] Process: ollama.exe (PID: 15132)
+      Bind Address : 127.0.0.1:11434
+      State        : LISTEN
+      User         : NANDAVELAN\NANDAVELAN SPS
+      Started      : 2026-10-05 21:00:27
+      Command      : C:\Users\NANDAVELAN SPS\AppData\Local\Programs\Ollama\ollama.exe serve
+```
+Verification confirmed:
+1. Identified the owning PID (`15132`).
+2. Identified the executable (`ollama.exe`).
+3. Captured the full command line arguments (`serve`).
+4. Resolved the owning user account and exact start timestamp.
+
+---
+
+## Phase 3: Safe Interactive Process Termination (`--kill`)
+
+### 1. The Core Problem
+When a port is occupied by an orphaned worker or zombie background process, developers often need to terminate it immediately. However, an unconstrained or automated kill tool is dangerous—it can terminate critical system services, databases with uncommitted transactions, or the developer tool itself.
+
+### 2. Operating System Concepts
+
+#### Signals & Termination Mechanics
+- **Graceful Termination (`SIGTERM` / `proc.terminate()`)**:
+  - In Unix-like systems, `SIGTERM` (signal 15) politely requests a process to exit. The process can catch this signal, flush in-memory buffers to disk, close database connections, and shut down cleanly.
+  - In Windows, processes do not have Unix-style signals. `proc.terminate()` issues a `TerminateProcess` Windows API call.
+- **Force Kill (`SIGKILL` / `proc.kill()`)**:
+  - If a process hangs in an uninterruptible state or ignores `SIGTERM`, `proc.kill()` (or `SIGKILL` signal 9) directs the OS kernel to instantly deallocate the process memory space.
+- **Two-Phase Termination Strategy**:
+  1. Call `proc.terminate()` and wait with a timeout (e.g., 3 seconds).
+  2. If the process has not terminated when the timeout expires, escalate to `proc.kill()`.
+
+#### Safety Guardrails
+To prevent catastrophic accidental termination:
+1. **Interactive Prompt**: Always require explicit user confirmation (`Kill process <pid> (<name>)? [y/N]: `) with `N` as default.
+2. **Protected PIDs**: Explicitly block PID 0 (System Idle) and PID 4 (Windows System Kernel).
+3. **Self-Termination Guard**: Block `os.getpid()` to prevent Port Detective from terminating itself.
+4. **Post-Termination Verification**: Re-probe the port with `is_port_in_use()` to confirm that the port was actually freed.
+
+### 3. Architecture Diagram
+
+```text
+       CLI: python portdetect 8080 --kill
+                       |
+                       v
+       +--------------------------------+
+       |   find_processes_on_port(8080) |
+       +---------------+----------------+
+                       |
+                       v
+       +--------------------------------+
+       |  Display Process Information   |
+       |  PID: 14320 (python.exe)       |
+       +---------------+----------------+
+                       |
+                       v
+       +--------------------------------+
+       | Safety Checks:                 |
+       | - PID != 0, 4 (System)         |
+       | - PID != os.getpid() (Self)    |
+       +---------------+----------------+
+                       |
+                       v
+       +--------------------------------+
+       | Interactive Prompt [y/N]       |
+       +---------------+----------------+
+             /                  \
+      [No]  /                    \  [Yes]
+           v                      v
+     +------------+      +-------------------------------+
+     | Skip / Exit|      | proc.terminate()              |
+     +------------+      | wait(3.0s)                    |
+                         +---------------+---------------+
+                                         |
+                            +------------+------------+
+                            |                         |
+                       Exited in 3s             TimeoutExpired
+                            |                         |
+                            v                         v
+                   +-----------------+       +-----------------+
+                   | Graceful Exit   |       | proc.kill()     |
+                   | Confirmed       |       | Force Killed    |
+                   +--------+--------+       +--------+--------+
+                            \                         /
+                             \                       /
+                              v                     v
+                             +-----------------------+
+                             | Re-probe Port Status  |
+                             | "Port 8080 is FREE"   |
+                             +-----------------------+
+```
+
+### 4. Implementation Details
+In [portdetect.py](file:///c:/Python/port_detect/portdetect.py):
+- Added `-k` / `--kill` argument via `argparse`.
+- Added `terminate_process_safely()` function implementing safety checks, interactive input, `terminate()` with 3s timeout, and fallback to `kill()`.
+- Added post-termination verification loop in `main()`.
+
+### 5. Windows PowerShell Execution & CLI Wrappers
+When executing Python CLI tools on Windows PowerShell:
+1. **Bare Command Resolution (`portdetect.py`)**: PowerShell does not search the current directory `.` unless prefixed with `.\` or `./` (for security).
+2. **The `.\portdetect.py` Silent Output Pitfall**: `.PY` is not present in Windows `$env:PATHEXT`. Running `.\portdetect.py` invokes the Windows file association launcher (`py.exe`) via `ShellExecute`, which runs detached from PowerShell's console stdout stream, causing stdout to be silently swallowed.
+3. **The Solution**:
+   - Explicit invocation: `python portdetect.py <port>`
+   - Native wrappers: [portdetect.cmd](file:///c:/Python/port_detect/portdetect.cmd) and [portdetect.ps1](file:///c:/Python/port_detect/portdetect.ps1) allow developers to run `.\portdetect <port>` or `portdetect <port>` directly with full standard I/O attached.
+
+---
+
+## Phase 4: Docker Container Detection & Attribution
+
+### 1. The Core Problem
+In modern software engineering, services frequently run inside Docker containers (PostgreSQL on 5432, Redis on 6379, microservices on 8080).
+When a developer investigates who is holding port 8080 on Windows:
+- Phase 2 identifies the host process: `com.docker.backend.exe` or `wslhost.exe`.
+- However, knowing that the Docker daemon or WSL proxy owns the port does **not** explain which container is actually running or why.
+Phase 4 unmasks the container behind the proxy: container name, container ID, image, and internal-to-external port mapping.
+
+### 2. Systems & Docker Concepts
+
+#### How Docker Publishes Ports (`-p host:container`)
+- When running `docker run -p 8080:80 nginx`, the container has its own private network namespace and IP address inside the Docker bridge network.
+- Docker configures network translation:
+  - On Linux: `iptables` / `nftables` rules forward traffic arriving at the host port to the container's private IP and port.
+  - On Windows (Docker Desktop): Docker runs inside a WSL2 VM. The Windows host forwards traffic through `com.docker.backend.exe` or `wslhost.exe` into the container engine.
+- The published port mapping looks like: `0.0.0.0:8080->80/tcp, [::]:8080->80/tcp`.
+
+#### Querying Docker Without Extra Dependencies
+- To keep `portdetect` lightweight and compliant with zero-extra-framework rules, we query the Docker CLI directly using standard library `subprocess`:
+  ```bash
+  docker ps --format "{{json .}}"
+  ```
+- This yields structured JSON objects for all running containers, including `ID`, `Names`, `Image`, `Status`, and `Ports`.
+- **Daemon Safety & Graceful Fallback**: If Docker Desktop is installed but the daemon is not running (or Docker is not installed), `subprocess.run()` catches `FileNotFoundError` or non-zero exit codes immediately with a short timeout (`2.5s`), ensuring `portdetect` never hangs or crashes.
+
+#### Graceful Docker Shutdown vs Host Process Killing
+- Killing the host process (`com.docker.backend.exe`) is destructive because it can crash the entire Docker Desktop environment.
+- The correct action when `--kill` targets a Docker-published port is to invoke `docker stop <container_name>`, allowing the container to receive `SIGTERM` and shut down gracefully.
+
+### 3. Architecture Diagram
+
+```text
+               CLI: python portdetect 8080
+                            |
+            +---------------+---------------+
+            |                               |
+            v                               v
+    OS Process Query                Docker Engine Query
+  (psutil.net_connections)       (docker ps --format json)
+            |                               |
+            v                               v
+   Host PID & Binary              Match Host Port (:8080->)
+ (com.docker.backend.exe)                   |
+            |                               v
+            |                      Container Metadata:
+            |                      - Name: web-service
+            |                      - Image: nginx:alpine
+            |                      - Port: 0.0.0.0:8080->80/tcp
+            \                               /
+             \                             /
+              v                           v
+            +-------------------------------+
+            | Combined Detective Report     |
+            | 🐳 Docker: web-service        |
+            | 💻 Host  : com.docker.backend |
+            +-------------------------------+
+```
+
+### 4. Implementation Details
+In [portdetect.py](file:///c:/Python/port_detect/portdetect.py):
+- `DockerContainerInfo` dataclass models container attribution.
+- `find_docker_containers_on_port(port)` executes `docker ps --format "{{json .}}"`, filters published host ports using regular expressions, and extracts container details.
+- `stop_docker_container_safely(container)` interactively prompts the user before running `docker stop <container>`.
+
+
+

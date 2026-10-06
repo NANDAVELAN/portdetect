@@ -1,0 +1,22 @@
+| id | task | status | notes |
+| --- | --- | --- | --- |
+| phase1-concept | Explain networking concepts and Phase 1 architecture | completed | |
+| phase1-code | Implement minimum socket check in portdetect.py | completed | |
+| phase1-verify | Verify script execution and pre-commit checks | completed | |
+| phase1-experiment | Run practical experiment and wait for user review | completed | |
+| phase1-docs | Document Phase 1 concepts and architecture in docs.md | completed | |
+| phase2-concept | Explain process detection, PIDs, and psutil architecture | completed | |
+| phase2-code | Implement process detection in portdetect.py | completed | |
+| phase2-verify | Verify process detection locally and run pre-commit checks | completed | |
+| phase2-experiment | Run practical process detection experiment (Ollama 11434) | completed | |
+| phase2-docs | Document Phase 2 experiment and attribution in docs.md | completed | |
+| phase3-concept | Explain process termination, SIGTERM vs SIGKILL, and safety prompts | completed | |
+| phase3-code | Implement interactive --kill flag with confirmation in portdetect.py | completed | |
+| phase3-verify | Verify --kill flag locally and run pre-commit checks | completed | |
+| phase3-bugfix-ps | Add portdetect.cmd and portdetect.ps1 for PowerShell CLI support | completed | |
+| phase3-experiment | Guide user through safe termination experiment | completed | |
+| phase3-docs | Document Phase 3 concepts, signals, and wrappers in docs.md | completed | |
+| phase4-concept | Explain Docker port forwarding, container attribution, and daemon checks | completed | |
+| phase4-code | Implement find_docker_containers_on_port() in portdetect.py | completed | |
+| phase4-verify | Verify Docker container inspection and fallback handling | completed | |
+| phase4-experiment | Guide user through Docker container port detection experiment | in_progress | |
