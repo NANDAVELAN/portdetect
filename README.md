@@ -22,18 +22,65 @@ Developers frequently encounter `EADDRINUSE` or `bind: address already in use` w
 
 ## Installation
 
-### Editable / Local Install
+### Prerequisites
+- **Python 3.10+** ([python.org](https://www.python.org/downloads/))
+- **Git** (optional, for cloning)
+
+---
+
+### Option 1: Direct Install via pip (Quickest)
+Install directly from GitHub into your active Python environment:
 ```bash
-# Clone the repository
+pip install git+https://github.com/NANDAVELAN/portdetect.git
+```
+This registers the global `portdetect` command automatically.
+
+---
+
+### Option 2: Clone & Editable Install (Development Mode)
+Recommended if you want to modify the code or contribute:
+
+```bash
+# 1. Clone the repository
 git clone https://github.com/NANDAVELAN/portdetect.git
 cd portdetect
 
-# Install in editable mode
+# 2. (Optional) Create and activate a virtual environment
+# Windows (PowerShell):
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+
+# Linux / macOS:
+python3 -m venv .venv
+source .venv/bin/activate
+
+# 3. Install in editable mode
 pip install -e .
 ```
 
-Now you can invoke `portdetect` directly from any shell (PowerShell, CMD, Bash, Zsh).
+Once installed, invoke `portdetect` directly from any terminal:
+```bash
+portdetect --version
+# Output: portdetect 1.0.0
+```
 
+---
+
+### Option 3: Run Directly Without Installation
+If you prefer not to install the package globally or into a venv, you can run it right from the project directory:
+
+- **Windows PowerShell**:
+  ```powershell
+  .\portdetect.ps1 8080
+  ```
+- **Windows Command Prompt (CMD)**:
+  ```cmd
+  portdetect.cmd 8080
+  ```
+- **Linux / macOS / Any OS via Python**:
+  ```bash
+  python portdetect.py 8080
+  ```
 ---
 
 ## Quick Start
