@@ -2,4 +2,5 @@
 .venv/
 __pycache__/
 setup-agent-env.sh
-tests
+.agent/
+tests/
