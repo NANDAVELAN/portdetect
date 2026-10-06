@@ -62,6 +62,8 @@ Once installed, invoke `portdetect` directly from any terminal:
 ```bash
 portdetect --version
 # Output: portdetect 1.0.0
+
+portdetect --help
 ```
 
 ---
@@ -170,9 +172,9 @@ Port Detective **never** terminates processes silently. It:
 
 ## CLI Options Reference
 
-```text
-usage: portdetect [-h] [-a] [--json] [-k] [--host HOST] [--timeout TIMEOUT]
-                  [-w WORKERS] [-v] [ports ...]
+```bash
+$ portdetect --help
+usage: portdetect [-h] [-a] [--json] [-k] [--host HOST] [--timeout TIMEOUT] [-w WORKERS] [-v] [ports ...]
 
 Port Detective - Discover and manage processes and Docker containers using network ports.
 
@@ -180,13 +182,14 @@ positional arguments:
   ports                 Port number(s) or range(s) to inspect (e.g. 8080, 8000-8005, 3000,5432)
 
 options:
-  -h, --help            Show this help message and exit
+  -h, --help            show this help message and exit
   -a, --all             Scan and list all actively listening ports on the host system
   --json                Output results in JSON format
-  -k, --kill            Interactively terminate process or stop container using the port
+  -k, --kill            Interactively terminate process or stop container using the port (prompts for confirmation)
   --host HOST           Host address for loopback socket probe (default: 127.0.0.1)
   --timeout TIMEOUT     Socket timeout in seconds (default: 1.0)
-  -w, --workers WORKERS Maximum concurrent worker threads for multi-port scanning (default: 32)
+  -w WORKERS, --workers WORKERS
+                        Maximum concurrent worker threads for multi-port scanning (default: 32)
   -v, --version         Show program version and exit
 ```
 
