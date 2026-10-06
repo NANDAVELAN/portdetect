@@ -201,9 +201,6 @@ pytest -v
 
 ## Documentation
 
-Explore the complete documentation suite in the [`docs/`](docs/) folder:
-- **[Architecture & Internals](docs/ARCHITECTURE.md)**: Deep dive into the layered inspection pipeline, concurrency model, and cross-platform OS internals.
-- **[CLI Command Reference](docs/CLI_REFERENCE.md)**: Complete guide to arguments, options, flags, exit codes, and JSON schema.
-- **[Product Specification](docs/PORT_DETECTIVE_SPEC.md)**: Functional requirements, non-functional targets, and safety invariants.
-- **[Technical & Learning Guide](docs/docs.md)**: Educational phase-by-phase breakdown (Phases 1–8) covering sockets, signals, Docker proxies, and testing.
-- **[Documentation Index](docs/README.md)**: Quick portal for all documentation resources.
+The complete technical manual, systems deep dive, and CLI reference are available in:
+- **[docs/docs.md](docs/docs.md)**: Product specification, CLI options, internal architecture, cross-platform details, and the complete step-by-step learning guide (Phases 1–8).
+
