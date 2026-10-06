@@ -26,4 +26,13 @@
 | phase5-verify | Run automated test suite (12 tests passing) | completed | |
 | phase5-experiment | Guide user through running automated test suite | completed | |
 | phase5-docs | Document Phase 5 testing architecture and mocking in docs.md | completed | |
+| phase6-concept | Explain range parsing, system-wide listening discovery, and JSON output | completed | |
+| phase6-code | Implement multi-port ranges, --all, and --json output in portdetect.py | completed | |
+| phase6-verify | Add unit tests for range parsing and JSON, verify test suite | completed | |
+| phase6-experiment | Guide user through multi-port and JSON practical experiment | completed | |
+| phase6-docs | Document Phase 6 architecture, tables, and JSON schema in docs.md | completed | |
+| phase7-concurrent | Implement concurrent multi-port scanning using ThreadPoolExecutor | completed | |
+| phase8-packaging | Configure pyproject.toml and README.md for CLI installation | completed | |
+| phase8-verify | Run full test suite with 26 unit tests passing | completed | |
+
 

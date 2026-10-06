@@ -388,6 +388,128 @@ In [tests/test_portdetect.py](file:///c:/Python/port_detect/tests/test_portdetec
 - `TestDockerDetection`: Verifies JSON parsing and daemon offline handling.
 - `TestSafetyGuardrails`: Verifies hard invariants blocking PID 0, PID 4, and self PID termination.
 
+---
+
+## Phase 6: Multi-Port Scanning, System-Wide Discovery (`--all`), and JSON Output (`--json`)
+
+### 1. The Core Problem
+In production and development workflows, debugging network conflicts requires more than probing single isolated ports:
+1. **Multi-Port & Range Checks**: Microservices, web dev stacks, and database clusters bind multiple ports (e.g., frontend on 3000, backend on 8000, Postgres on 5432, Redis on 6379). Developers need to inspect entire ranges (`8000-8010`) or comma-separated lists (`8080,3000,5432`) in a single execution.
+2. **System-Wide Listening Discovery (`--all` / `-a`)**: Answering *"What is listening on my machine right now?"* without guessing port numbers beforehand.
+3. **Machine-Readable Automation (`--json`)**: Devops, CI pipelines, and AI agent harnesses require machine-parseable structured output rather than ANSI terminal strings.
+
+### 2. Networking & Systems Concepts
+
+#### 1. Port Range & Spec Tokenization
+Users provide port specifications in diverse CLI formats:
+- Individual ports: `8080`
+- Comma-separated: `8080,3000`
+- Inclusive ranges: `8000-8005`
+- Combinations: `8080,9000-9003,5432`
+
+`parse_port_specs()` tokenizes the input, expands hyphenated ranges (`range(start, end + 1)`), validates port boundaries (`1 <= port <= 65535`), enforces `start <= end`, and deduplicates into a sorted list of integer ports.
+
+#### 2. System-Wide Listening Port Discovery
+Instead of scanning all 65,535 TCP ports with sequential `connect_ex()` handshakes (which takes several minutes), `find_all_listening_ports()` leverages the operating system's kernel connection table:
+- Calls `psutil.net_connections(kind="inet")` to retrieve connections in state `psutil.CONN_LISTEN`.
+- Extracts local endpoint ports (`conn.laddr.port`).
+- Queries active Docker containers (`docker ps --format "{{json .}}"`) to extract published host ports.
+- Merges and sorts all unique listening ports in milliseconds (`< 0.05s`).
+
+#### 3. Structured Data Modeling (`PortReport`)
+A unified dataclass `PortReport` consolidates diagnostic results for each inspected port:
+- `port`: Port number (`int`).
+- `in_use`: Boolean state.
+- `processes`: List of `ProcessInfo` objects.
+- `docker_containers`: List of `DockerContainerInfo` objects.
+- `to_dict()`: Serializes into a clean dictionary ready for `json.dumps()`.
+
+### 3. Architecture Diagram
+
+```text
+                        CLI Invocation
+         (portdetect 8000-8005 | --all | --json)
+                           |
+             +-------------+-------------+
+             |                           |
+             v                           v
+     Positional Specs            System Discovery (--all)
+    (parse_port_specs)          (find_all_listening_ports)
+             |                           |
+             +-------------+-------------+
+                           |
+                           v
+                 Target Port List [ports]
+                           |
+                           v  inspect_port()
+           +---------------+---------------+
+           |               |               |
+           v               v               v
+     Socket Probe    OS Processes     Docker Engine
+     (connect_ex)   (psutil tables)  (docker ps json)
+           \               |               /
+            \              |              /
+             v             v             v
+            +------------------------------+
+            |      List[PortReport]        |
+            +--------------+---------------+
+                           |
+             +-------------+-------------+
+             |                           |
+    Flag: --json?              Flag: Multiple Ports?
+             |                           |
+             v                           v
+     Structured JSON             Summary Table / Rich View
+```
+
+### 4. Implementation Details
+In [portdetect.py](file:///c:/Python/port_detect/portdetect.py):
+- `PortReport`: Consolidated dataclass with `.to_dict()` serialization.
+- `parse_port_specs(specs)`: Robust parser supporting commas, ranges, bounds validation, and sorting.
+- `find_all_listening_ports()`: Blazing-fast system discovery combining `psutil` connection states with Docker published ports.
+- `inspect_port(port)`: Unifies socket, process, and container diagnostic queries.
+- `display_multi_port_table(reports)`: Formats multiple results into a high-density tabular terminal view.
+- `parse_args()`: Adds `--all`, `--json`, and accepts variable positional `ports` while retaining full backward compatibility for `args.port`.
+
+---
+
+## Phase 7: High-Throughput Concurrent Range Scanning (`concurrent.futures`)
+
+### 1. The Core Problem
+When inspecting large ranges (e.g. `8000-8100`), sequential socket probes across dozens of closed ports cause noticeable latency if remote hosts or filtered networks don't respond immediately with `RST`.
+Sequentially checking 100 ports at 1.0s timeout could theoretically take up to 100 seconds in worst-case conditions.
+
+### 2. Multi-Threading with `ThreadPoolExecutor`
+- **I/O Bound Workload**: Socket connects and process queries are primarily network and OS kernel I/O bound. This makes Python threads (`threading` / `concurrent.futures.ThreadPoolExecutor`) ideal without being bottlenecked by the Global Interpreter Lock (GIL).
+- **Worker Concurrency**: Slices multi-port workloads across up to 32 worker threads (configurable via `-w/--workers`).
+- **Deterministic Port Ordering**: While threads complete asynchronously via `as_completed()`, results are mapped back to a dictionary keyed by port number and returned in original sorted order.
+
+### 3. Implementation Details
+In [portdetect.py](file:///c:/Python/port_detect/portdetect.py):
+- `inspect_ports_concurrently(ports, host, timeout, max_workers)`: Dynamically spins up worker threads (`min(max_workers, len(ports))`) to probe all targets concurrently, reducing scan times from seconds to fractions of a second.
+- Single-port queries (`len(ports) <= 1`) bypass thread creation overhead completely.
+
+---
+
+## Phase 8: Modern Packaging & Cross-Platform CLI Distribution
+
+### 1. The Core Problem
+Relying on direct script invocations (`python portdetect.py` or `.cmd` wrappers) creates developer friction. Users expect a first-class command (`portdetect 8080`) executable from any directory across PowerShell, CMD, Bash, and Zsh.
+
+### 2. Standards-Compliant Packaging (`pyproject.toml`)
+Port Detective follows modern PEP 517 / PEP 621 packaging specifications:
+- **Build Backend**: `setuptools.build_meta`
+- **Console Script Entrypoint**: `[project.scripts] portdetect = "portdetect:main"`
+- **Dependencies**: Explicitly requires `psutil>=5.9.0`
+- **Zero Global Pollution**: Enables standard local installation via `pip install -e .`
+
+### 3. Implementation Details
+- [pyproject.toml](file:///c:/Python/port_detect/pyproject.toml): Configures metadata, entry points, and dependencies.
+- [README.md](file:///c:/Python/port_detect/README.md): Full user and developer guide with quick start examples and option references.
+- [tests/test_portdetect.py](file:///c:/Python/port_detect/tests/test_portdetect.py): Full 26-test suite testing all core functionality, safety guardrails, and concurrent execution.
+
+
+
 
 
 

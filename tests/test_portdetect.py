@@ -10,13 +10,21 @@ import psutil
 
 from portdetect import (
     DockerContainerInfo,
+    PortReport,
     ProcessInfo,
+    __version__,
+    find_all_listening_ports,
     find_docker_containers_on_port,
     find_processes_on_port,
+    inspect_port,
+    inspect_ports_concurrently,
     is_port_in_use,
     parse_args,
+    parse_port_specs,
     terminate_process_safely,
 )
+
+
 
 
 class TestArgParsing(unittest.TestCase):
@@ -168,5 +176,128 @@ class TestSafetyGuardrails(unittest.TestCase):
         self.assertFalse(result)
 
 
+class TestPortSpecParsing(unittest.TestCase):
+    """Test port specification parsing (individual, comma-separated, ranges)."""
+
+    def test_single_port(self):
+        self.assertEqual(parse_port_specs(["8080"]), [8080])
+
+    def test_comma_separated(self):
+        self.assertEqual(parse_port_specs(["8080,3000"]), [3000, 8080])
+
+    def test_range(self):
+        self.assertEqual(parse_port_specs(["8000-8003"]), [8000, 8001, 8002, 8003])
+
+    def test_mixed_specs_and_deduplication(self):
+        specs = ["8080", "8000-8002", "8080", "5432,8001"]
+        self.assertEqual(parse_port_specs(specs), [5432, 8000, 8001, 8002, 8080])
+
+    def test_invalid_syntax(self):
+        with self.assertRaises(ValueError):
+            parse_port_specs(["invalid"])
+
+    def test_out_of_bounds(self):
+        with self.assertRaises(ValueError):
+            parse_port_specs(["0"])
+        with self.assertRaises(ValueError):
+            parse_port_specs(["70000"])
+
+    def test_inverted_range(self):
+        with self.assertRaises(ValueError):
+            parse_port_specs(["8005-8000"])
+
+
+class TestMultiPortAndJson(unittest.TestCase):
+    """Test multi-port arguments, JSON reporting, and listening port discovery."""
+
+    def test_parse_args_all_and_json(self):
+        args = parse_args(["--all", "--json"])
+        self.assertTrue(args.all)
+        self.assertTrue(args.json)
+        self.assertEqual(args.ports, [])
+
+    def test_parse_args_multi_ports(self):
+        args = parse_args(["8080", "3000-3002", "--json"])
+        self.assertEqual(args.ports, ["8080", "3000-3002"])
+        self.assertEqual(args.port, 8080)
+        self.assertTrue(args.json)
+
+    def test_port_report_to_dict(self):
+        report = PortReport(
+            port=8080,
+            in_use=True,
+            processes=[
+                ProcessInfo(
+                    pid=1234,
+                    name="python.exe",
+                    bind_addresses=["127.0.0.1:8080"],
+                    status="LISTEN",
+                    cmdline="python server.py",
+                    username="TESTUSER",
+                    created_at="2026-10-06 12:00:00",
+                )
+            ],
+            docker_containers=[
+                DockerContainerInfo(
+                    container_id="c1a2b3",
+                    name="web-server",
+                    image="nginx",
+                    port_mapping="0.0.0.0:8080->80/tcp",
+                    status="Up 2 hours",
+                )
+            ],
+        )
+        d = report.to_dict()
+        self.assertEqual(d["port"], 8080)
+        self.assertEqual(d["status"], "in_use")
+        self.assertEqual(len(d["processes"]), 1)
+        self.assertEqual(d["processes"][0]["pid"], 1234)
+        self.assertEqual(len(d["docker_containers"]), 1)
+        self.assertEqual(d["docker_containers"][0]["name"], "web-server")
+
+    @patch("psutil.net_connections")
+    @patch("subprocess.run")
+    def test_find_all_listening_ports(self, mock_subproc, mock_net_conns):
+        # Setup mock connection
+        mock_conn = MagicMock()
+        mock_conn.status = psutil.CONN_LISTEN
+        mock_conn.laddr = MagicMock(port=8080)
+        mock_net_conns.return_value = [mock_conn]
+
+        # Setup mock docker
+        mock_subproc.return_value.returncode = 0
+        mock_subproc.return_value.stdout = json.dumps({"Ports": "0.0.0.0:3000->3000/tcp"}) + "\n"
+
+        ports = find_all_listening_ports()
+        self.assertEqual(ports, [3000, 8080])
+
+
+class TestConcurrentInspection(unittest.TestCase):
+    """Test concurrent multi-port scanning."""
+
+    @patch("portdetect.inspect_port")
+    def test_inspect_ports_concurrently(self, mock_inspect):
+        def side_effect(port, host="127.0.0.1", timeout=1.0):
+            return PortReport(port=port, in_use=False, processes=[], docker_containers=[])
+
+        mock_inspect.side_effect = side_effect
+        ports = [8080, 8081, 8082, 8083]
+        reports = inspect_ports_concurrently(ports, max_workers=4)
+
+        self.assertEqual(len(reports), 4)
+        self.assertEqual([r.port for r in reports], [8080, 8081, 8082, 8083])
+        self.assertEqual(mock_inspect.call_count, 4)
+
+    def test_single_port_concurrent_bypass(self):
+        reports = inspect_ports_concurrently([8080])
+        self.assertEqual(len(reports), 1)
+
+    def test_parse_args_workers(self):
+        args = parse_args(["8080", "--workers", "16"])
+        self.assertEqual(args.workers, 16)
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
