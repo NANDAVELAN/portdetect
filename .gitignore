@@ -4,3 +4,4 @@ __pycache__/
 setup-agent-env.sh
 .agent/
 tests/
+*.egg-info/
