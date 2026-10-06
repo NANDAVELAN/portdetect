@@ -327,5 +327,67 @@ In [portdetect.py](file:///c:/Python/port_detect/portdetect.py):
 - `find_docker_containers_on_port(port)` executes `docker ps --format "{{json .}}"`, filters published host ports using regular expressions, and extracts container details.
 - `stop_docker_container_safely(container)` interactively prompts the user before running `docker stop <container>`.
 
+---
+
+## Phase 5: Automated Testing Suite (`unittest` & `pytest`)
+
+### 1. The Core Problem
+Relying exclusively on manual terminal experiments (`python -m http.server`, starting/stopping Docker containers) is slow and cannot reliably test edge cases such as:
+- Operating system permission denials (`psutil.AccessDenied`)
+- Malformed Docker output or offline Docker daemons
+- Hard-coded safety invariants (refusal to terminate PID 0, PID 4, or self)
+Phase 5 introduces an isolated, deterministic automated test suite in [tests/test_portdetect.py](file:///c:/Python/port_detect/tests/test_portdetect.py).
+
+### 2. Testing Concepts & Mocking
+
+#### The Mocking Strategy (`unittest.mock`)
+Systems code interacts directly with the OS kernel (sockets, process tables, Docker pipes). In automated testing:
+- **`@patch("socket.socket")`**: Simulates TCP handshakes returning `0` (listening) or `10061` (connection refused) without opening real OS sockets.
+- **`@patch("psutil.net_connections")`**: Simulates arbitrary connection tables and tests `psutil.AccessDenied` exception handling.
+- **`@patch("subprocess.run")`**: Injects simulated JSON responses for `docker ps` and tests offline daemon fallback.
+- **`@patch("builtins.input")`**: Simulates user terminal responses (`y`, `n`, Enter) to verify interactive confirmation gates non-interactively.
+
+#### Dual Runner Compatibility
+Tests are written using Python's standard library `unittest` framework:
+- Can be executed with zero third-party packages:
+  ```bash
+  python -m unittest discover tests
+  ```
+- Also natively discoverable and runnable by `pytest`:
+  ```bash
+  pytest -v
+  ```
+
+### 3. Architecture Diagram
+
+```text
+                        Test Suite Entrypoint
+                   (python -m unittest discover)
+                                 |
+                 +---------------+---------------+
+                 |                               |
+                 v                               v
+         Unit Tests (Pure)             Mocked Integration Tests
+         - Argument parsing            - Sockets: connect_ex (0 vs 10061)
+         - Port bounds (1-65535)       - Process: psutil & AccessDenied
+         - Safety invariant checks:    - Docker: JSON parsing & daemon offline
+           PID 0, 4, Self PID          - Input prompt: 'y' vs 'n'
+                 |                               |
+                 +---------------+---------------+
+                                 |
+                                 v
+                       12 / 12 Tests Passing
+                        (Zero Dependencies)
+```
+
+### 4. Implementation Details
+In [tests/test_portdetect.py](file:///c:/Python/port_detect/tests/test_portdetect.py):
+- `TestArgParsing`: Verifies positional and optional flags (`--kill`, `--host`, `--timeout`).
+- `TestSocketCheck`: Verifies socket handling with mocked `connect_ex`.
+- `TestProcessDetection`: Verifies connection table parsing and `psutil.AccessDenied` resilience.
+- `TestDockerDetection`: Verifies JSON parsing and daemon offline handling.
+- `TestSafetyGuardrails`: Verifies hard invariants blocking PID 0, PID 4, and self PID termination.
+
+
 
 

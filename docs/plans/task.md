@@ -19,4 +19,11 @@
 | phase4-concept | Explain Docker port forwarding, container attribution, and daemon checks | completed | |
 | phase4-code | Implement find_docker_containers_on_port() in portdetect.py | completed | |
 | phase4-verify | Verify Docker container inspection and fallback handling | completed | |
-| phase4-experiment | Guide user through Docker container port detection experiment | in_progress | |
+| phase4-experiment | Guide user through Docker container port detection experiment | completed | |
+| phase4-docs | Document Phase 4 Docker architecture and mapping in docs.md | completed | |
+| phase5-concept | Explain testing strategy, mocking, and safety invariant tests | completed | |
+| phase5-code | Implement unit test suite in tests/test_portdetect.py | completed | |
+| phase5-verify | Run automated test suite (12 tests passing) | completed | |
+| phase5-experiment | Guide user through running automated test suite | completed | |
+| phase5-docs | Document Phase 5 testing architecture and mocking in docs.md | completed | |
+
