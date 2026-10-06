@@ -6,7 +6,18 @@
 
 Developers frequently encounter `EADDRINUSE` or `bind: address already in use` errors when launching local dev servers, containers, or background workers. Port Detective identifies whether a port is occupied, unmasks the exact operating system process (PID, name, full command line, user), and checks for Docker container port mappings.
 
+### Table of Contents
+- [Phase 1: Minimum Socket-Based Port Check](#phase-1-minimum-socket-based-port-check)
+- [Phase 2: Process Detection & Attribution](#phase-2-process-detection--attribution)
+- [Phase 3: Safe Interactive Process Termination (`--kill`)](#phase-3-safe-interactive-process-termination---kill)
+- [Phase 4: Docker Container Detection & Attribution](#phase-4-docker-container-detection--attribution)
+- [Phase 5: Automated Testing Suite (`unittest` & `pytest`)](#phase-5-automated-testing-suite-unittest--pytest)
+- [Phase 6: Multi-Port Scanning, System-Wide Discovery (`--all`), and JSON Output (`--json`)](#phase-6-multi-port-scanning-system-wide-discovery---all-and-json-output---json)
+- [Phase 7: High-Throughput Concurrent Range Scanning (`concurrent.futures`)](#phase-7-high-throughput-concurrent-range-scanning-concurrentfutures)
+- [Phase 8: Modern Packaging & Cross-Platform CLI Distribution](#phase-8-modern-packaging--cross-platform-cli-distribution)
+
 ---
+
 
 ## Phase 1: Minimum Socket-Based Port Check
 
